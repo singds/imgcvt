@@ -23,33 +23,38 @@ SOFTWARE.
 */
 
 //____________________________________________________________INCLUDES - DEFINES
+#include "imgCvt.h"
+
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdint.h>
 #include <stdbool.h>
 #include <unistd.h>
+#include <getopt.h>
 #include "lodepng/lodepng.h"
 
 #define L_PRINT_GEN_ERR                                fprintf (stderr, "ERROR ON %s:%d\n", __FILE__, __LINE__)
 #define L_NELEMENTS(array)                             (sizeof (array) / sizeof (array[0]))
 
-enum
-{
-    L_CLR_FORMAT_RGBA8888,
-    L_CLR_FORMAT_ARGB8888,
-    L_CLR_FORMAT_RGBA5658,
-    L_CLR_FORMAT_ARGB8565,
-};
+typedef void (*FuncWritePxl_t) (FILE *f, uint8_t *inClr);
+typedef void (*FuncTraversePixel_t) (FILE *f, char *img, uint32_t w, uint32_t h, FuncWritePxl_t wrPxl);
 
 //____________________________________________________________PRIVATE PROTOTYPES
 static void PrintHelp (void);
 static void Convert (void);
 static void GetBeInt32t (uint8_t *leVal, int32_t val);
 
-static void WriteClrRGBA8888 (FILE *f, uint8_t *inClr);
 static void WriteClrARGB8888 (FILE *f, uint8_t *inClr);
-static void WriteClrRGBA5658 (FILE *f, uint8_t *inClr);
-static void WriteClrARGB8565 (FILE *f, uint8_t *inClr);
+static void WriteClrBGRA8888 (FILE *f, uint8_t *inClr);
+static void WriteClrRGB565LE (FILE *f, uint8_t *inClr);
+static void WriteClrRGB565BE (FILE *f, uint8_t *inClr);
+static void WriteClrARGB565LE (FILE *f, uint8_t *inClr);
+static void WriteClrARGB565BE (FILE *f, uint8_t *inClr);
+
+
+static void TraversePixelOri0   (FILE *f, char *img, uint32_t w, uint32_t h, FuncWritePxl_t wrPxl);
+static void TraversePixelOri90  (FILE *f, char *img, uint32_t w, uint32_t h, FuncWritePxl_t wrPxl);
+static void TraversePixelOri180 (FILE *f, char *img, uint32_t w, uint32_t h, FuncWritePxl_t wrPxl);
+static void TraversePixelOri270 (FILE *f, char *img, uint32_t w, uint32_t h, FuncWritePxl_t wrPxl);
 
 //___________________________________________________________________PRIVATE VAR
 /* image file path */
@@ -57,17 +62,35 @@ static char *ArgIn_FnameImg = NULL;
 /* output file path */
 static char *ArgIn_FnameOut = NULL;
 /* output color format */
-static int8_t ArgIn_ClrFomat = L_CLR_FORMAT_RGBA8888;
+static int8_t ArgIn_ClrFomat = IMGCVT_CLR_FORMAT_ARGB8888;
+/* output pxl orientation */
+static int8_t ArgIn_Ori = IMGCVT_ORI_0;
 
 /* pixel write function (default RGBA8888 output) */
-static void (*WritePxl) (FILE *f, uint8_t *inClr) = WriteClrRGBA8888;
+FuncWritePxl_t WritePxl = WriteClrARGB8888;
 
-static void (*WritePxlTable[]) (FILE *f, uint8_t *) =
+struct
 {
-    WriteClrRGBA8888,
-    WriteClrARGB8888,
-    WriteClrRGBA5658,
-    WriteClrARGB8565,
+    const char *name; // color format string name
+    FuncWritePxl_t func_write;
+} PxlFormatTable[] =
+{
+    [IMGCVT_CLR_FORMAT_ARGB8888] =  { "argb8888", WriteClrARGB8888 },
+    [IMGCVT_CLR_FORMAT_BGRA8888] =  { "bgra8888", WriteClrBGRA8888 },
+    [IMGCVT_CLR_FORMAT_RGB565LE] =  { "rgb565le", WriteClrRGB565LE },
+    [IMGCVT_CLR_FORMAT_RGB565BE] =  { "rgb565be", WriteClrRGB565BE },
+    [IMGCVT_CLR_FORMAT_ARGB565LE] = { "argb565le", WriteClrARGB565LE },
+    [IMGCVT_CLR_FORMAT_ARGB565BE] = { "argb565be", WriteClrARGB565BE },
+};
+
+/* pixel traversal function (default rotation 0) */
+FuncTraversePixel_t TraversePixel = TraversePixelOri0;
+FuncTraversePixel_t TraversePixelTable[] =
+{
+    [IMGCVT_ORI_0] =   TraversePixelOri0,
+    [IMGCVT_ORI_90] =  TraversePixelOri90,
+    [IMGCVT_ORI_180] = TraversePixelOri180,
+    [IMGCVT_ORI_270] = TraversePixelOri270,
 };
 
 //____________________________________________________________________GLOBAL VAR
@@ -90,7 +113,7 @@ int main (int argc, char *argv[])
     bool argsOk = true;
 
     /* parse command line options */
-    while ((c = getopt (argc, argv, ":o:f:h")) != -1)
+    while ((c = getopt (argc, argv, ":o:f:r:h")) != -1)
     {
         switch (c)
         {
@@ -112,22 +135,44 @@ int main (int argc, char *argv[])
             case 'f':
             {
                 ArgIn_ClrFomat = -1;
-                if (strcmp (optarg, "rgba8888") == 0)
-                    ArgIn_ClrFomat = L_CLR_FORMAT_RGBA8888;
-                else if (strcmp (optarg, "argb8888") == 0)
-                    ArgIn_ClrFomat = L_CLR_FORMAT_ARGB8888;
-                else if (strcmp (optarg, "rgba5658") == 0)
-                    ArgIn_ClrFomat = L_CLR_FORMAT_RGBA5658;
-                else if (strcmp (optarg, "argb8565") == 0)
-                    ArgIn_ClrFomat = L_CLR_FORMAT_ARGB8565;
-                
+                for (int i = 0; i < L_NELEMENTS (PxlFormatTable); i++)
+                {
+                    if (strcmp (optarg, PxlFormatTable[i].name) == 0)
+                        ArgIn_ClrFomat = i;
+                }
                 
                 if (ArgIn_ClrFomat != -1) // get the corresponding put function
-                    WritePxl = WritePxlTable[ArgIn_ClrFomat];
+                    WritePxl = PxlFormatTable[ArgIn_ClrFomat].func_write;
                 else
                 {
                     argsOk = false;
                     fprintf (stderr, "%s is not a valid color format\n", optarg);
+                }
+                break;
+            }
+
+            /* specify image rotation */
+            case 'r':
+            {
+                int rotation;
+
+                ArgIn_Ori = -1;
+                rotation = atoi (optarg);
+                if (rotation == 0)
+                    ArgIn_Ori = IMGCVT_ORI_0;
+                else if (rotation == 90)
+                    ArgIn_Ori = IMGCVT_ORI_90;
+                else if (rotation == 180)
+                    ArgIn_Ori = IMGCVT_ORI_180;
+                else if (rotation == 270)
+                    ArgIn_Ori = IMGCVT_ORI_270;
+                
+                if (ArgIn_Ori != -1) // get the corresponding pixel traversal function
+                    TraversePixel = TraversePixelTable[ArgIn_Ori];
+                else
+                {
+                    argsOk = false;
+                    fprintf (stderr, "%s is not a valid rotation\n", optarg);
                 }
                 break;
             }
@@ -184,11 +229,10 @@ imgcvt use:\n\
     fontcvt [OPTIONS] ... IMAGE_FILE -o OUTPUT_NAME\n");
     printf ("\n");
     printf ("\
--f) Output color format. (default rgba8888). Valid options are:\n\
-    * rgba8888\n\
-    * argb8888\n\
-    * rgba5658\n\
-    * argb8565\n");
+-f) Output color format. (default argb8888).\n");
+    printf ("\
+-r) Output image rotation. (default 0). Valid options are:\n\
+    (  0) ( 90) (180) (270)\n");
     printf ("\
 -o) Specify the output filename. (mandatory)\n");
     printf ("\
@@ -218,29 +262,29 @@ static void Convert (void)
         {
             uint8_t beWidth[4]; // big endian width
             uint8_t beHeigth[4]; // big endian height
+            uint8_t bePxlOffset[4]; // big pixel offset
             uint8_t clrFormat; // output image color format
+            uint8_t ori; // output image orientation
 
             clrFormat = ArgIn_ClrFomat;
+            ori = ArgIn_Ori;
             GetBeInt32t (beWidth, width);
             GetBeInt32t (beHeigth, height);
+            GetBeInt32t (bePxlOffset, 32);
 
             /* print simple file header */
-            fprintf (f, "RAWv01");
-            fwrite (&clrFormat, 1, sizeof (clrFormat), f); // color format
+            fprintf (f, "RAW");
+            fprintf (f, "v01");
+            fwrite (&ori, 1, sizeof (ori), f);
+            fwrite (&clrFormat, 1, sizeof (clrFormat), f);
             fwrite (beWidth, 1, sizeof (beWidth), f); // width
             fwrite (beHeigth, 1, sizeof (beHeigth), f); // height
+            fwrite (bePxlOffset, 1, sizeof (bePxlOffset), f); // height
+            for (int i = 0; i < (32 - 20); i++)
+                fprintf (f, "-");
 
             /* print image pixels */
-            for (int y = 0; y < height; y++)
-            {
-                for (int x = 0; x < width; x++)
-                {
-                    uint8_t *inClr;
-
-                    inClr = &image[(x + y * width) * 4];
-                    WritePxl (f, inClr);
-                }
-            }
+            TraversePixel (f, image, width, height, WritePxl);
             fclose (f);
         }
     }
@@ -261,20 +305,92 @@ static void GetBeInt32t (uint8_t *leVal, int32_t val)
     leVal[0] = (val >> 24) & 0xff;
 }
 
-/* Add pixel to file.
-    Args: <f>[in] append pxl to this file.
-          <inClr>[in] RGBA8888 input color.
+/* Write all image pixel to file.
+    Args: <f>[in] append all pixel to the file.
+          <img>[in] RGBA8888 pixel map.
+          <w>[in] image width.
+          <h>[in] image height.
+          <wrPxl>[in] function used to write pixel in file.
     Ret:
 */
-static void WriteClrRGBA8888 (FILE *f, uint8_t *inClr)
+static void TraversePixelOri0 (FILE *f, char *img, uint32_t w, uint32_t h, FuncWritePxl_t wrPxl)
 {
-    uint8_t outClr[4];
+    for (int y = 0; y < h; y++)
+    {
+        for (int x = 0; x < w; x++)
+        {
+            uint8_t *inClr;
 
-    outClr[0] = inClr[0];
-    outClr[1] = inClr[1];
-    outClr[2] = inClr[2];
-    outClr[3] = inClr[3];
-    fwrite (&outClr, 1, sizeof (outClr), f);
+            inClr = &img[(x + y * w) * 4];
+            wrPxl (f, inClr);
+        }
+    }
+}
+
+/* Write all image pixel to file.
+    Args: <f>[in] append all pixel to the file.
+          <img>[in] RGBA8888 pixel map.
+          <w>[in] image width.
+          <h>[in] image height.
+          <wrPxl>[in] function used to write pixel in file.
+    Ret:
+*/
+static void TraversePixelOri90 (FILE *f, char *img, uint32_t w, uint32_t h, FuncWritePxl_t wrPxl)
+{
+    for (int x = w - 1; x >= 0; x--)
+    {
+        for (int y = 0; y < h; y++)
+        {
+            uint8_t *inClr;
+
+            inClr = &img[(x + y * w) * 4];
+            wrPxl (f, inClr);
+        }
+    }
+}
+
+/* Write all image pixel to file.
+    Args: <f>[in] append all pixel to the file.
+          <img>[in] RGBA8888 pixel map.
+          <w>[in] image width.
+          <h>[in] image height.
+          <wrPxl>[in] function used to write pixel in file.
+    Ret:
+*/
+static void TraversePixelOri180 (FILE *f, char *img, uint32_t w, uint32_t h, FuncWritePxl_t wrPxl)
+{
+    for (int y = h - 1; y >= 0; y--)
+    {
+        for (int x = w - 1; x >= 0; x--)
+        {
+            uint8_t *inClr;
+
+            inClr = &img[(x + y * w) * 4];
+            wrPxl (f, inClr);
+        }
+    }
+}
+
+/* Write all image pixel to file.
+    Args: <f>[in] append all pixel to the file.
+          <img>[in] RGBA8888 pixel map.
+          <w>[in] image width.
+          <h>[in] image height.
+          <wrPxl>[in] function used to write pixel in file.
+    Ret:
+*/
+static void TraversePixelOri270 (FILE *f, char *img, uint32_t w, uint32_t h, FuncWritePxl_t wrPxl)
+{
+    for (int x = 0; x < w; x++)
+    {
+        for (int y = h - 1; y >= 0; y--)
+        {
+            uint8_t *inClr;
+
+            inClr = &img[(x + y * w) * 4];
+            wrPxl (f, inClr);
+        }
+    }
 }
 
 /* Add pixel to file.
@@ -298,18 +414,14 @@ static void WriteClrARGB8888 (FILE *f, uint8_t *inClr)
           <inClr>[in] RGBA8888 input color.
     Ret:
 */
-static void WriteClrRGBA5658 (FILE *f, uint8_t *inClr)
+static void WriteClrBGRA8888 (FILE *f, uint8_t *inClr)
 {
-    uint8_t outClr[3];
-    uint16_t color; // rgb565 color
+    uint8_t outClr[4];
 
-    color =  (inClr[0] >> 3) << (6 + 5);
-    color += (inClr[1] >> 2) << (5);
-    color += (inClr[2] >> 3) << (0);
-
-    outClr[0] = (color >> 8) & 0xff;
-    outClr[1] = (color) & 0xff;
-    outClr[2] = inClr[3];
+    outClr[0] = inClr[2];
+    outClr[1] = inClr[1];
+    outClr[2] = inClr[0];
+    outClr[3] = inClr[3];
     fwrite (&outClr, 1, sizeof (outClr), f);
 }
 
@@ -318,7 +430,65 @@ static void WriteClrRGBA5658 (FILE *f, uint8_t *inClr)
           <inClr>[in] RGBA8888 input color.
     Ret:
 */
-static void WriteClrARGB8565 (FILE *f, uint8_t *inClr)
+static void WriteClrRGB565LE (FILE *f, uint8_t *inClr)
+{
+    uint8_t outClr[2];
+    uint16_t color; // rgb565 color
+
+    color =  (inClr[0] >> 3) << (6 + 5);
+    color += (inClr[1] >> 2) << (5);
+    color += (inClr[2] >> 3) << (0);
+
+    outClr[0] = (color) & 0xff;
+    outClr[1] = (color >> 8) & 0xff;
+    fwrite (&outClr, 1, sizeof (outClr), f);
+}
+
+/* Add pixel to file.
+    Args: <f>[in] append pxl to this file.
+          <inClr>[in] RGBA8888 input color.
+    Ret:
+*/
+static void WriteClrRGB565BE (FILE *f, uint8_t *inClr)
+{
+    uint8_t outClr[2];
+    uint16_t color; // rgb565 color
+
+    color =  (inClr[0] >> 3) << (6 + 5);
+    color += (inClr[1] >> 2) << (5);
+    color += (inClr[2] >> 3) << (0);
+
+    outClr[0] = (color >> 8) & 0xff;
+    outClr[1] = (color) & 0xff;
+    fwrite (&outClr, 1, sizeof (outClr), f);
+}
+
+/* Add pixel to file.
+    Args: <f>[in] append pxl to this file.
+          <inClr>[in] RGBA8888 input color.
+    Ret:
+*/
+static void WriteClrARGB565LE (FILE *f, uint8_t *inClr)
+{
+    uint8_t outClr[3];
+    uint16_t color; // rgb565 color
+
+    color =  (inClr[0] >> 3) << (6 + 5);
+    color += (inClr[1] >> 2) << (5);
+    color += (inClr[2] >> 3) << (0);
+
+    outClr[0] = inClr[3];
+    outClr[1] = (color) & 0xff;
+    outClr[2] = (color >> 8) & 0xff;
+    fwrite (&outClr, 1, sizeof (outClr), f);
+}
+
+/* Add pixel to file.
+    Args: <f>[in] append pxl to this file.
+          <inClr>[in] RGBA8888 input color.
+    Ret:
+*/
+static void WriteClrARGB565BE (FILE *f, uint8_t *inClr)
 {
     uint8_t outClr[3];
     uint16_t color; // rgb565 color

@@ -5,7 +5,7 @@ P_DIR_BUILD=${P_DIR_PROJECT}/build
 # imgcvt source directory
 P_DIR_SRC=${P_DIR_PROJECT}/src
 
-P_GCC_FLAGS= -g
+P_GCC_FLAGS= -g -std=c99
 
 .PHONY: compile
 compile:
@@ -15,7 +15,7 @@ compile:
 		mkdir ${P_DIR_BUILD}; \
 	fi
 	
-	gcc ${P_DIR_SRC}/imgcvt.c ${P_DIR_SRC}/lodepng/lodepng.c ${P_GCC_FLAGS} -o ${P_DIR_BUILD}/imgcvt
+	gcc ${P_DIR_SRC}/imgCvt.c ${P_DIR_SRC}/lodepng/lodepng.c ${P_GCC_FLAGS} -o ${P_DIR_BUILD}/imgcvt
 	@echo ok ... build done
 
 .PHONY: clean
