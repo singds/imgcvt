@@ -37,6 +37,7 @@ SOFTWARE.
 
 typedef void (*FuncWritePxl_t) (FILE *f, uint8_t *inClr);
 typedef void (*FuncTraversePixel_t) (FILE *f, char *img, uint32_t w, uint32_t h, FuncWritePxl_t wrPxl);
+void lodepng_free (void* ptr);
 
 //____________________________________________________________PRIVATE PROTOTYPES
 static void PrintHelp (void);
@@ -289,7 +290,7 @@ static void Convert (void)
         }
     }
 
-    free(image);
+    lodepng_free (image);
 }
 
 /* Get big endian 32bit number rappresentation.
