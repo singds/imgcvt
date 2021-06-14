@@ -35,6 +35,7 @@ enum
     IMGCVT_CLR_FORMAT_RGB565BE, // big endian
     IMGCVT_CLR_FORMAT_ARGB565LE, // little endian
     IMGCVT_CLR_FORMAT_ARGB565BE, // big endian
+    IMGCVT_CLR_FORMAT_RGBA8888,
 };
 
 enum

@@ -37,7 +37,6 @@ SOFTWARE.
 
 typedef void (*FuncWritePxl_t) (FILE *f, uint8_t *inClr);
 typedef void (*FuncTraversePixel_t) (FILE *f, char *img, uint32_t w, uint32_t h, FuncWritePxl_t wrPxl);
-void lodepng_free (void* ptr);
 
 //____________________________________________________________PRIVATE PROTOTYPES
 static void PrintHelp (void);
@@ -50,6 +49,7 @@ static void WriteClrRGB565LE (FILE *f, uint8_t *inClr);
 static void WriteClrRGB565BE (FILE *f, uint8_t *inClr);
 static void WriteClrARGB565LE (FILE *f, uint8_t *inClr);
 static void WriteClrARGB565BE (FILE *f, uint8_t *inClr);
+static void WriteClrRGBA8888 (FILE *f, uint8_t *inClr);
 
 
 static void TraversePixelOri0   (FILE *f, char *img, uint32_t w, uint32_t h, FuncWritePxl_t wrPxl);
@@ -82,6 +82,7 @@ struct
     [IMGCVT_CLR_FORMAT_RGB565BE] =  { "rgb565be", WriteClrRGB565BE },
     [IMGCVT_CLR_FORMAT_ARGB565LE] = { "argb565le", WriteClrARGB565LE },
     [IMGCVT_CLR_FORMAT_ARGB565BE] = { "argb565be", WriteClrARGB565BE },
+    [IMGCVT_CLR_FORMAT_RGBA8888] = { "rgba8888", WriteClrRGBA8888 },
 };
 
 /* pixel traversal function (default rotation 0) */
@@ -290,7 +291,7 @@ static void Convert (void)
         }
     }
 
-    lodepng_free (image);
+    free (image);
 }
 
 /* Get big endian 32bit number rappresentation.
@@ -422,6 +423,22 @@ static void WriteClrBGRA8888 (FILE *f, uint8_t *inClr)
     outClr[0] = inClr[2];
     outClr[1] = inClr[1];
     outClr[2] = inClr[0];
+    outClr[3] = inClr[3];
+    fwrite (&outClr, 1, sizeof (outClr), f);
+}
+
+/* Add pixel to file.
+    Args: <f>[in] append pxl to this file.
+          <inClr>[in] RGBA8888 input color.
+    Ret:
+*/
+static void WriteClrRGBA8888 (FILE *f, uint8_t *inClr)
+{
+    uint8_t outClr[4];
+
+    outClr[0] = inClr[0];
+    outClr[1] = inClr[1];
+    outClr[2] = inClr[2];
     outClr[3] = inClr[3];
     fwrite (&outClr, 1, sizeof (outClr), f);
 }
