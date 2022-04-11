@@ -46,6 +46,12 @@ enum
     IMGCVT_ORI_270,
 };
 
+typedef enum
+{
+    IMGCVT_OK = 0,
+    IMGCVT_ERR,
+} imgcvt_Result_e;
+
 typedef struct
 {   // all number are stored in BIG ENDIAN
     char magic[3]; // magic identifier (always RAW)
@@ -56,5 +62,7 @@ typedef struct
     uint32_t height;
     uint32_t pxl_offset;
 } imgcvt_Header_t;
+
+imgcvt_Result_e imgcvt_Convert (const char *inF, const char *outF, int8_t clrFormat, int8_t ori);
 
 #endif // IMGCVT_H_INCLUDED
